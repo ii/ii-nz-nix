@@ -1,0 +1,131 @@
+#+title: diary
+
+* Intro
+this page tracks the work around developing the ii-nz site.  It's sorta a meta blog for the blog.
+* Getting started with nix
+SCHEDULED: <2023-05-22 Mon>
+I started up this new repo because, to be honest,  I found the repo on gitlab.com/ii/nz real confusing to move through, and my ideal is to have a site repository that is as simple as possible, following as close to the standard setup as possible.
+
+In this case, I want the standard hugo setup supported by a basic nix development environment.
+
+So i started a new repo and just put in a flake.nix file.  The flake.nix is made up of inputs and outputs, the inputs being sort of like the main modules  you are importing, and the outputs being the packages and results you wanna see.
+
+So, in our case, our inputs are the standard nixpkgs, flake-utils, and our hugo theme.  It's cool that I can add the hugo theme as an import, because it means we can pin it to a specific hash in their repo, and trust that the theme won't change even if the development moves on.  We also don't then need to handle git submodules and the complexity they can bring.
+
+#+begin_src nix
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs";
+    flake-utils.url = "github:numtide/flake-utils";
+    harbor = {
+      url = "github:matsuyoshi30/harbor";
+      flake = false;
+    };
+  };
+#+end_src
+
+Our outputs, then will be made up of two things, packages (that get built into /result) and a devShell, which is entered with the command ~nix develop~.
+
+I am happy to have found flake-utils, as it makes the package setup easier than the standard you see.  Instead of having to specify every type of package yr building for, you can just do a forEach statement of sorts for any possible package.
+
+So an outputs template could be something like
+
+#+begin_src nix
+  outputs = { self, nixpkgs, flake-utils, harbor }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let pkgs = nixpkgs.legacyPackages.${system};
+          blog = {};# a blog derivation
+      in {
+        packages =  {
+          blog = blog;
+          default = blog;
+        };
+        devShell = {};# ...here would be function to create shell.pkgs.mkShell
+      });
+}
+#+end_src
+
+Then, if we built this, we'd end up with packages for all major architectures
+
+#+begin_src shell :dir .. :results raw
+nix flake show
+#+end_src
+
+#+begin_example
+git+file:///Users/zz/src/ii/ii-nz?ref=refs%2fheads%2fcanon&rev=a0727150cae625bff0f256fc3e32f3ffdef33487
+├───devShell
+│   ├───aarch64-darwin: development environment 'nix-shell'
+│   ├───aarch64-linux: development environment 'nix-shell'
+│   ├───x86_64-darwin: development environment 'nix-shell'
+│   └───x86_64-linux: development environment 'nix-shell'
+└───packages
+    ├───aarch64-darwin
+    │   ├───blog: package 'blog'
+    │   └───default: package 'blog'
+    ├───aarch64-linux
+    │   ├───blog: package 'blog'
+    │   └───default: package 'blog'
+    ├───x86_64-darwin
+    │   ├───blog: package 'blog'
+    │   └───default: package 'blog'
+    └───x86_64-linux
+        ├───blog: package 'blog'
+        └───default: package 'blog'
+#+end_example
+
+As for the actual derivation to make the blog, it is made up of instructions on how to install our package (for the first time, or when we are running ~nix develop~), how to build the stuf that'll end up in ~/result~ and any meta info.  So for our purposes, it ends up looking like:
+#+begin_src nix
+#...
+blog = pkgs.stdenv.mkDerivation {
+  name = "blog";
+  src = builtins.filterSource
+    (path: type: !(type == ''directory'' &&
+                   (baseNameOf path == ''themes'' ||
+                    baseNameOf path == ''public'')))
+    ./.;
+  buildPhase = ''
+              mkdir -p themes
+              ln -s ${harbor} themes/harbor
+              ${pkgs.hugo}/bin/hugo --minify
+            '';
+  installPhase = ''
+              cp -r public $out
+            '';
+  meta = with pkgs.lib; {
+    description = ''the ii.nz blog'';
+    platforms = platforms.all;
+  };
+};
+#...
+#+end_src
+
+For the source, we just wanna make sure we're ignoring either the compiled directory (what would be public) and our themes directory, since we are manually bringing the theme over from the nix store.
+
+
+And the dev shell is similar, can load it up with any packages your shell environment needs, plus an initial hook that is run when entering that environment.  In this case, our hook is just making sure we have the theme in the right place.
+
+#+begin_src nix
+#...
+devShell = pkgs.mkShell {
+    buildInputs = with pkgs; [ hello cowsay hugo];
+    shellHook = ''
+    mkdir -p themes
+    ln -sf ${harbor} themes/harbor
+    '';
+};
+#...
+#+end_src
+
+I added  the hello and cowsay packages cos it helped me make sure the dev environment was working.  I dont' have either packages installed on my system, but when i ran ~nix develop~ i could then also run ~cowsay $(hello)~ and get a nice message.  I could also run ~hugo server -D~ and get started with the blog.
+
+I thought about adding ~hugo server -D~ to that hook, but thought against it, cos it could get annoying fast...e.g. when we integrate this with direnv, and yr trying to cd into this directory from multiple sessions and each one keeps trying to start up a development server.
+
+I then copied over the main content from the existing blog.  It's not all working yet, of course, but it's a nice enough start.
+
+** Next
+I want to add a basic ci pipeline that builds the artifacts of this on push to main, so that we have nice static assets in a tarball that can be easily deployed wherever.
+
+I want to fix up the presentations, so that the original presentation org files are retained and we still get the nice revealjs stuff we spent so long on.
+
+I also want to add direnv support, to make the dev environment even easier.  That really is just installing direnv and adding an .envrc file that has "use flake" at the top...so should be relatively easy.
+
+Then we just gotta figure out where the site should be hosted and setup the pipeline to pull the newest changes into the host.  I am curiouis about how simply we can do this...to not have to involve custom backends, with ko build pipelines and kubernetes manifests and such.  Can nix reduce the infra overhead?
