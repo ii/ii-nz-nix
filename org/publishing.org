@@ -1,0 +1,47 @@
+#+title: Publishing
+
+* Ways to publish
+** Shell script in repo
+This script can only be run by person with access to s5 bucket.
+
+We assume this person:
+- has nix installed on their machine
+- has the correct env vars set
+- has an .aws/creds file in the repo.
+- are connected to the cluster with the s3 buckets
+- has done a portforward from local machine to the bucket via kubectl
+- have s5cmd installed on their computer.
+
+With those pre-reqs in place, they can just run ~./publish.sh~
+Which is really these three lines:
+
+#+begin_src
+#!/usr/bin/env sh
+
+nix build
+s5cmd --endpoint-url http://$AWS_HOST:$PORT cp --exclude ".git/*" ii_nz_website/ s3://$BUCKET_NAME
+rm result
+#+end_src
+
+There are a lot of prerequisites to get this to work, but they are almost entirely secrets.  These are not something we want baked into the shell script.
+
+
+** Github Action
+Longer term, we can setup a github action workflow that reproduces the
+above steps.
+
+This would likely require some adjustment to the bucket so that it is accessible via public ingress.
+
+With that set, our steps would be:
+- checkout repo
+- setup s5cmd
+- nix build
+- s5cmd copy
+
+There are existing actions for all of these.  The main thing to figure out is how we would want to handle the necessary secrets.
+
+
+** Nix
+It is perhaps possible to add a hook to our build step that pushes the result to an s3 bucket.  This removes the generic reusability of the nix flake, though, and still needs to handle secrets.  Am not sure if thre's a benefit to this method over a ci workflow that uses nix actions.
+**  ???
+There may be some other way we haven't considered that is the best option.  Let's discuss!
