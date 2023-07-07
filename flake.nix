@@ -19,7 +19,7 @@
               ./.;
             buildPhase = ''
               mkdir -p themes
-              ln -s ${harbor} themes/harbor
+              ln -sfn ${harbor} themes/harbor
               ${pkgs.hugo}/bin/hugo --minify
             '';
             installPhase = ''
@@ -39,7 +39,7 @@
           buildInputs = with pkgs; [ hello cowsay hugo];
           shellHook = ''
             mkdir -p themes
-            ln -sf ${harbor} themes/harbor
+            ln -sfn ${harbor} themes/harbor
           '';
         };
       });
